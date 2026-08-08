@@ -1,0 +1,6 @@
+{
+  "name": "Fitness Tracker",
+  "description": "An AI-powered fitness app tracking daily workout progress, nutrition, and offering personalized meal plans and adjustments based on performance.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

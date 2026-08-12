@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/img_app_icon_publish_1786125273695"
+        android:drawable="@drawable/ic_fitness_logo_1780488922042"
         android:gravity="center" />
 </layer-list>

@@ -53,6 +53,7 @@ fun WellnessToolsTab(
     heightCm: Float,
     age: Int,
     restingHr: Int,
+    gender: String = "",
     onSaveProfile: (weight: Float, height: Float, age: Int, restingHr: Int, targetCal: Int, targetProt: Int, targetCarb: Int, targetFat: Int) -> Unit,
     onApplyPreset: (String) -> Unit,
     weightHistory: List<Triple<String, String, Float>>,
@@ -75,12 +76,12 @@ fun WellnessToolsTab(
     var weightInputForDiary by remember { mutableStateOf("") }
 
     // User inputs for basic BMR / BMI Calculator
-    var weightInput by remember(weightKg) { mutableStateOf(if (weightKg % 1f == 0f) weightKg.toInt().toString() else weightKg.toString()) }
-    var heightInput by remember(heightCm) { mutableStateOf(if (heightCm % 1f == 0f) heightCm.toInt().toString() else heightCm.toString()) }
-    var ageInput by remember(age) { mutableStateOf(age.toString()) }
-    var restingHrInput by remember(restingHr) { mutableStateOf(restingHr.toString()) }
+    var weightInput by remember(weightKg) { mutableStateOf(if (weightKg <= 0f) "" else if (weightKg % 1f == 0f) weightKg.toInt().toString() else weightKg.toString()) }
+    var heightInput by remember(heightCm) { mutableStateOf(if (heightCm <= 0f) "" else if (heightCm % 1f == 0f) heightCm.toInt().toString() else heightCm.toString()) }
+    var ageInput by remember(age) { mutableStateOf(if (age <= 0) "" else age.toString()) }
+    var restingHrInput by remember(restingHr) { mutableStateOf(if (restingHr <= 0) "" else restingHr.toString()) }
 
-    var selectedGender by remember { mutableStateOf("Male") }
+    var selectedGender by remember(gender) { mutableStateOf(gender) }
     var selectedActivityLevel by remember { mutableStateOf("Moderate") }
 
     val activityMultipliers = mapOf(
@@ -97,15 +98,15 @@ fun WellnessToolsTab(
     val aVal = ageInput.toIntOrNull() ?: 0
     val hrVal = restingHrInput.toIntOrNull() ?: 0
 
-    val bmi = if (hVal > 0) wVal / ((hVal / 100f) * (hVal / 100f)) else 0f
-    val bmr = if (selectedGender == "Male") {
-        (10 * wVal) + (6.25f * hVal) - (5 * aVal) + 5
-    } else {
+    val bmi = if (hVal > 0f && wVal > 0f) wVal / ((hVal / 100f) * (hVal / 100f)) else 0f
+    val bmr = if (wVal <= 0f || hVal <= 0f || aVal <= 0 || selectedGender.isBlank()) 0f else if (selectedGender.equals("Female", ignoreCase = true)) {
         (10 * wVal) + (6.25f * hVal) - (5 * aVal) - 161
+    } else {
+        (10 * wVal) + (6.25f * hVal) - (5 * aVal) + 5
     }
 
     val multiplier = activityMultipliers[selectedActivityLevel] ?: 1.55f
-    val tdee = bmr * multiplier
+    val tdee = if (bmr > 0f) bmr * multiplier else 0f
 
     // Macro budgets
     val targetCaloriesComputed = tdee.toInt()
@@ -524,6 +525,7 @@ fun WellnessToolsTab(
                                             value = weightInput,
                                             onValueChange = { weightInput = it },
                                             label = { Text("Weight (kg)") },
+                                            placeholder = { Text("Weight") },
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                             modifier = Modifier
                                                 .weight(1f)
@@ -534,6 +536,7 @@ fun WellnessToolsTab(
                                             value = heightInput,
                                             onValueChange = { heightInput = it },
                                             label = { Text("Height (cm)") },
+                                            placeholder = { Text("Height") },
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                                             modifier = Modifier
                                                 .weight(1f)
@@ -550,20 +553,11 @@ fun WellnessToolsTab(
                                             value = ageInput,
                                             onValueChange = { ageInput = it },
                                             label = { Text("Age (yrs)") },
+                                            placeholder = { Text("Age") },
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                             modifier = Modifier
-                                                .weight(1f)
+                                                .fillMaxWidth()
                                                 .testTag("age_input"),
-                                            shape = RoundedCornerShape(10.dp)
-                                        )
-                                        OutlinedTextField(
-                                            value = restingHrInput,
-                                            onValueChange = { restingHrInput = it },
-                                            label = { Text("Resting Pulse") },
-                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .testTag("resting_hr_input"),
                                             shape = RoundedCornerShape(10.dp)
                                         )
                                     }
@@ -680,7 +674,7 @@ fun WellnessToolsTab(
                                                 wVal,
                                                 hVal,
                                                 aVal,
-                                                hrVal,
+                                                0,
                                                 targetCaloriesComputed,
                                                 targetProteinComputed,
                                                 targetCarbsComputed,
@@ -734,16 +728,15 @@ fun WellnessToolsTab(
                                         )
                                     }
 
+                                    val maxHr = if (aVal > 0) (220 - aVal) else 195
+
                                     Text(
-                                        text = "Calculated using the Karvonen formula based on resting pulse ($hrVal bpm) & Age ($aVal):",
+                                        text = "Calculated based on standard Maximum Heart Rate (220 - Age = $maxHr bpm):",
                                         fontSize = 11.sp,
                                         color = colorScheme.onSurfaceVariant
                                     )
 
                                     Spacer(modifier = Modifier.height(4.dp))
-
-                                    val maxHr = 220 - aVal
-                                    val hrr = maxHr - hrVal
 
                                     val zones = listOf(
                                         HeartRateZoneInfo("Recover / Light", 0.5f, 0.6f, Color(0xFF008080), "Warmup, endurance preparation and recovery stimulation."),
@@ -753,8 +746,8 @@ fun WellnessToolsTab(
                                     )
 
                                     zones.forEach { zone ->
-                                        val lowerBpm = (hrr * zone.lowerLimit + hrVal).toInt()
-                                        val uperBpm = (hrr * zone.upperLimit + hrVal).toInt()
+                                        val lowerBpm = (maxHr * zone.lowerLimit).toInt()
+                                        val uperBpm = (maxHr * zone.upperLimit).toInt()
 
                                         Row(
                                             modifier = Modifier

@@ -2,7 +2,22 @@ package com.example.data
 
 import kotlinx.coroutines.flow.Flow
 
-class FitnessRepository(private val fitnessDao: FitnessDao) {
+class FitnessRepository(
+    private val fitnessDao: FitnessDao,
+    private val userProfileDao: UserProfileDao
+) {
+
+    val userProfile: Flow<UserProfileEntity?> = userProfileDao.getUserProfile()
+
+    suspend fun getUserProfileOnce(): UserProfileEntity? = userProfileDao.getUserProfileOnce()
+
+    suspend fun saveUserProfile(profile: UserProfileEntity) {
+        userProfileDao.insertOrUpdateProfile(profile)
+    }
+
+    suspend fun clearUserProfile() {
+        userProfileDao.clearUserProfile()
+    }
 
     val allWorkouts: Flow<List<WorkoutProgress>> = fitnessDao.getAllWorkoutProgress()
 
@@ -53,5 +68,6 @@ class FitnessRepository(private val fitnessDao: FitnessDao) {
         fitnessDao.clearAllDiets()
         fitnessDao.clearAllRecommendations()
         fitnessDao.clearAllNutritionAnalyses()
+        userProfileDao.clearUserProfile()
     }
 }

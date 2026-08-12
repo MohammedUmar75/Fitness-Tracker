@@ -6,29 +6,17 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [WorkoutProgress::class, DietIntake::class, AIRecommendation::class, NutritionAnalysis::class],
-    version = 2,
+    entities = [WorkoutProgress::class, DietIntake::class, AIRecommendation::class, NutritionAnalysis::class, UserProfileEntity::class],
+    version = 3,
     exportSchema = false
 )
 abstract class FitnessDatabase : RoomDatabase() {
     abstract fun fitnessDao(): FitnessDao
+    abstract fun userProfileDao(): UserProfileDao
 
     companion object {
-        @Volatile
-        private var INSTANCE: FitnessDatabase? = null
-
-        fun getDatabase(context: Context): FitnessDatabase {
-            return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
-                    context.applicationContext,
-                    FitnessDatabase::class.java,
-                    "fitness_database"
-                )
-                    .fallbackToDestructiveMigration()
-                    .build()
-                INSTANCE = instance
-                instance
-            }
+        fun getDatabase(context: Context): AppDatabase {
+            return DatabaseModule.provideAppDatabase(context)
         }
     }
 }

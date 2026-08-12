@@ -6,15 +6,19 @@ import com.example.data.AIRecommendation
 import com.example.data.DietIntake
 import com.example.data.WorkoutProgress
 import com.example.data.NutritionAnalysis
+import com.example.data.EstimatedFoodNutrition
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+import com.example.data.UserProfile
 
 class GeminiService {
 
     suspend fun getNutritionAdjustment(
         workouts: List<WorkoutProgress>,
         diets: List<DietIntake>,
-        dateStr: String
+        dateStr: String,
+        userProfile: UserProfile? = null
     ): AIRecommendation = withContext(Dispatchers.IO) {
         val apiKey = BuildConfig.GEMINI_API_KEY
         if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
@@ -40,9 +44,26 @@ class GeminiService {
             }
         }
 
+        val profileStr = userProfile?.let {
+            """
+            ### USER HEALTH PROFILE & PERSONALIZED METRICS:
+            - Name: ${it.name}
+            - Age: ${it.age} | Gender: ${it.gender}
+            - Height: ${it.heightCm} cm | Weight: ${it.weightKg} kg
+            - BMI: ${"%.1f".format(it.bmi)} (${it.bmiCategory})
+            - Activity Level: ${it.activityLevel}
+            - Primary Fitness Goal: ${it.fitnessGoal}
+            - Calculated BMR: ${it.bmr} kcal/day | TDEE: ${it.tdee} kcal/day
+            - Personalized Calorie Target: ${it.recommendedCalories} kcal
+            - Target Macros: ${it.recommendedProteinGrams}g Protein, ${it.recommendedCarbsGrams}g Carbs, ${it.recommendedFatGrams}g Fat
+            """.trimIndent()
+        } ?: "No explicit user profile configured."
+
         val prompt = """
             You are an expert sports dietitian and professional fitness trainer.
-            Analyze the following workout progress and nutritional intake for better health and weight management, and provide personalized meal plans and AI-powered nutritional adjustments based on their performance data.
+            Analyze the following workout progress, nutritional intake, and personalized body metrics to provide tailored meal plans and AI-powered nutritional adjustments based on their specific goals and biological data.
+
+            $profileStr
 
             ### CURRENT WORKOUT HISTORY FOR $dateStr:
             $workoutLog
@@ -50,19 +71,20 @@ class GeminiService {
             ### CURRENT DIET INTAKE FOR $dateStr:
             $dietLog
 
-            Based on this performance data:
+            Based on this performance and body metric data:
+            - Respect the user's primary goal (${userProfile?.fitnessGoal ?: "General Fitness"}) and body composition.
             - If they logged intense/long workouts, adjust protein and carb targets upwards to support recovery and preserve muscle.
             - If they logged high nutritional intake but low or no workouts, suggest structural deficit targets and lightweight active recoveries.
             - Suggest customized menus/meals (Breakfast, Lunch, Dinner, Snack) fit for these targets in markdown code.
 
             Return the response EXACTLY as a single JSON object with no markdown wrappers or text outside the curly braces. The JSON structure:
             {
-              "suggestion": "Detailed professional review of their daily actions and how to adjust their behavior. Mention custom macronutrient thresholds decided.",
+              "suggestion": "Detailed professional review of their daily actions and how to adjust their behavior tailored to their goal.",
               "mealPlan": "Personalized meals recommendations list in standard clean Markdown bullets",
-              "caloriesTarget": 2200,
-              "proteinTarget": 120,
-              "carbsTarget": 250,
-              "fatTarget": 70
+              "caloriesTarget": ${userProfile?.recommendedCalories ?: 2200},
+              "proteinTarget": ${userProfile?.recommendedProteinGrams ?: 120},
+              "carbsTarget": ${userProfile?.recommendedCarbsGrams ?: 250},
+              "fatTarget": ${userProfile?.recommendedFatGrams ?: 70}
             }
         """.trimIndent()
 
@@ -263,6 +285,122 @@ class GeminiService {
                 *   **Substitute High-Sugar Candies**
                     *   Swap synthetic bars or cookies with high-density fibers like raw almonds, sunflower seeds, sugar-free greek yogurt, or fresh organic blueberries.
             """.trimIndent()
+        )
+    }
+
+    suspend fun estimateFoodNutrition(
+        foodName: String,
+        quantity: String
+    ): EstimatedFoodNutrition = withContext(Dispatchers.IO) {
+        val apiKey = BuildConfig.GEMINI_API_KEY
+        if (apiKey.isEmpty() || apiKey == "MY_GEMINI_API_KEY") {
+            return@withContext getFallbackFoodEstimation(foodName, quantity)
+        }
+
+        val prompt = """
+            You are a professional nutrition database and automated calorie/macronutrient calculator.
+            Estimate the nutritional breakdown for the following food item and quantity consumed.
+
+            Food Name: $foodName
+            Quantity Consumed: $quantity
+
+            Return the response EXACTLY as a single JSON object with no markdown code block wrappers or extra text outside the curly braces.
+            Output JSON schema:
+            {
+              "calories": 450,
+              "protein": 25,
+              "carbs": 50,
+              "fat": 15,
+              "note": "Estimated for 1 portion (~300g)"
+            }
+        """.trimIndent()
+
+        val request = GenerateContentRequest(
+            contents = listOf(Content(parts = listOf(Part(text = prompt)))),
+            generationConfig = GenerationConfig(
+                responseMimeType = "application/json",
+                temperature = 0.2
+            )
+        )
+
+        try {
+            val response = GeminiApiClient.service.generateContent(apiKey, request)
+            val rawText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+                ?: return@withContext getFallbackFoodEstimation(foodName, quantity)
+
+            val cleanedText = cleanJsonString(rawText)
+            val adapter = GeminiApiClient.moshi.adapter(FoodEstimationParsed::class.java)
+            val parsed = adapter.fromJson(cleanedText)
+
+            if (parsed != null) {
+                EstimatedFoodNutrition(
+                    foodName = foodName.trim(),
+                    quantity = quantity.trim(),
+                    calories = parsed.calories.coerceAtLeast(0),
+                    protein = parsed.protein.coerceAtLeast(0),
+                    carbs = parsed.carbs.coerceAtLeast(0),
+                    fat = parsed.fat.coerceAtLeast(0),
+                    note = parsed.note ?: "Calculated for $quantity $foodName"
+                )
+            } else {
+                getFallbackFoodEstimation(foodName, quantity)
+            }
+        } catch (e: Exception) {
+            Log.e("GeminiService", "Food estimation API call failed", e)
+            getFallbackFoodEstimation(foodName, quantity)
+        }
+    }
+
+    private fun getFallbackFoodEstimation(foodName: String, quantity: String): EstimatedFoodNutrition {
+        val nameLower = foodName.lowercase()
+        val qtyLower = quantity.lowercase()
+
+        val numberRegex = "(\\d+(?:\\.\\d+)?)".toRegex()
+        val match = numberRegex.find(qtyLower)
+        val numericVal = match?.value?.toFloatOrNull() ?: 1.0f
+
+        var baseCal = 250
+        var baseProt = 12
+        var baseCarb = 30
+        var baseFat = 8
+
+        when {
+            nameLower.contains("pizza") -> { baseCal = 280; baseProt = 12; baseCarb = 32; baseFat = 11 }
+            nameLower.contains("biryani") || nameLower.contains("fried rice") -> { baseCal = 450; baseProt = 20; baseCarb = 55; baseFat = 16 }
+            nameLower.contains("burger") -> { baseCal = 520; baseProt = 26; baseCarb = 42; baseFat = 28 }
+            nameLower.contains("chicken") -> { baseCal = 220; baseProt = 31; baseCarb = 2; baseFat = 9 }
+            nameLower.contains("egg") || nameLower.contains("omelet") -> { baseCal = 140; baseProt = 12; baseCarb = 2; baseFat = 10 }
+            nameLower.contains("apple") || nameLower.contains("banana") || nameLower.contains("fruit") -> { baseCal = 95; baseProt = 1; baseCarb = 24; baseFat = 0 }
+            nameLower.contains("salad") -> { baseCal = 150; baseProt = 5; baseCarb = 12; baseFat = 8 }
+            nameLower.contains("rice") || nameLower.contains("roti") || nameLower.contains("bread") -> { baseCal = 180; baseProt = 4; baseCarb = 38; baseFat = 2 }
+            nameLower.contains("milk") || nameLower.contains("shake") || nameLower.contains("smoothie") -> { baseCal = 210; baseProt = 8; baseCarb = 26; baseFat = 7 }
+            nameLower.contains("pasta") || nameLower.contains("spaghetti") || nameLower.contains("noodle") -> { baseCal = 380; baseProt = 14; baseCarb = 58; baseFat = 10 }
+            nameLower.contains("steak") || nameLower.contains("beef") -> { baseCal = 350; baseProt = 36; baseCarb = 0; baseFat = 22 }
+            nameLower.contains("fish") || nameLower.contains("salmon") -> { baseCal = 260; baseProt = 28; baseCarb = 0; baseFat = 15 }
+            nameLower.contains("sandwich") || nameLower.contains("wrap") -> { baseCal = 320; baseProt = 16; baseCarb = 36; baseFat = 12 }
+            nameLower.contains("soup") -> { baseCal = 130; baseProt = 6; baseCarb = 15; baseFat = 4 }
+            nameLower.contains("chocolate") || nameLower.contains("cake") || nameLower.contains("cookie") -> { baseCal = 310; baseProt = 4; baseCarb = 40; baseFat = 16 }
+        }
+
+        val multiplier = when {
+            qtyLower.contains("g") || qtyLower.contains("gram") -> (numericVal / 100f).coerceIn(0.2f, 10f)
+            qtyLower.contains("ml") -> (numericVal / 100f).coerceIn(0.2f, 10f)
+            else -> numericVal.coerceIn(0.2f, 10f)
+        }
+
+        val totalCal = (baseCal * multiplier).toInt()
+        val totalProt = (baseProt * multiplier).toInt()
+        val totalCarbs = (baseCarb * multiplier).toInt()
+        val totalFat = (baseFat * multiplier).toInt()
+
+        return EstimatedFoodNutrition(
+            foodName = foodName.trim(),
+            quantity = quantity.trim(),
+            calories = totalCal,
+            protein = totalProt,
+            carbs = totalCarbs,
+            fat = totalFat,
+            note = "Estimated calories & macros for $quantity $foodName"
         )
     }
 }

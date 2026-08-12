@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -24,8 +25,17 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.testTag
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import com.example.data.DietIntake
 import com.example.data.WorkoutProgress
+import com.example.data.EstimatedFoodNutrition
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -35,6 +45,15 @@ fun TrackersTab(
     selectedDate: String,
     workouts: List<WorkoutProgress>,
     diets: List<DietIntake>,
+    waterIntakeMl: Int = 0,
+    isWaterReminderEnabled: Boolean = false,
+    waterReminderIntervalHours: Int = 2,
+    onSetWaterReminder: (Boolean, Int) -> Unit = { _, _ -> },
+    onSendTestWaterNotification: () -> Unit = {},
+    isEstimatingFood: Boolean = false,
+    onEstimateFood: (String, String, (EstimatedFoodNutrition) -> Unit) -> Unit = { _, _, _ -> },
+    onAddWater: (Int) -> Unit = {},
+    onResetWater: () -> Unit = {},
     onSelectDate: (String) -> Unit,
     onAddWorkout: (String, Int, String, Int) -> Unit,
     onDeleteWorkout: (WorkoutProgress) -> Unit,
@@ -96,74 +115,11 @@ fun TrackersTab(
             onSelectDate = onSelectDate
         )
 
-        // 2. Active Workout Section
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Default.DirectionsRun, contentDescription = "Workouts", tint = colorScheme.tertiary)
-                        Text(
-                            text = "Workouts logged",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colorScheme.onSurface
-                        )
-                    }
 
-                    Box(
-                        modifier = Modifier
-                            .background(colorScheme.tertiaryContainer, CircleShape)
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = "-$totalCalsBurned kcal",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colorScheme.onTertiaryContainer
-                        )
-                    }
-                }
 
-                if (workouts.isEmpty()) {
-                    EmptySectionText("No exercise logged for this day. Get moving!")
-                } else {
-                    workouts.forEach { item ->
-                        WorkoutRowItem(
-                            item = item,
-                            onDelete = { onDeleteWorkout(item) }
-                        )
-                    }
-                }
 
-                Spacer(modifier = Modifier.height(4.dp))
 
-                Button(
-                    onClick = { showAddWorkoutDialog = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = colorScheme.tertiary),
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Add workout")
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Add Workout Entry")
-                }
-            }
-        }
-
-        // 3. Nutrition Intake Section
+        // 4. Nutrition Intake Section
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
@@ -229,6 +185,261 @@ fun TrackersTab(
                 }
             }
         }
+
+        // 4. Interactive Aqueous Water Monitor
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LocalDrink,
+                            contentDescription = "Water Tracker",
+                            tint = Color(0xFF33B5E5)
+                        )
+                        Text(
+                            text = "Aqueous Water Monitor",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Text(
+                        text = "$waterIntakeMl / 2500 ml",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFF33B5E5)
+                    )
+                }
+
+                // Wave/Liquid percentage bar
+                val currentPercent = if (waterIntakeMl > 0) (waterIntakeMl.toFloat() / 2500f).coerceIn(0f, 1f) else 0f
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    LinearProgressIndicator(
+                        progress = { currentPercent },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(18.dp)
+                            .clip(RoundedCornerShape(9.dp)),
+                        color = Color(0xFF33B5E5),
+                        trackColor = Color(0xFF33B5E5).copy(alpha = 0.15f)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = if (currentPercent >= 1.0f) "Maximum hydration reached! Excellent." else "Track and hit standard hydration quotas.",
+                            fontSize = 10.sp,
+                            color = colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "${(currentPercent * 100).toInt()}%",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Interaction controls row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { onAddWater(250) },
+                        modifier = Modifier.weight(1f).testTag("add_water_250_btn"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF33B5E5))
+                    ) {
+                        Text("+ 250 ml", fontSize = 11.sp, color = Color.White)
+                    }
+
+                    Button(
+                        onClick = { onAddWater(500) },
+                        modifier = Modifier.weight(1f).testTag("add_water_500_btn"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0099CC))
+                    ) {
+                        Text("+ 500 ml", fontSize = 11.sp, color = Color.White)
+                    }
+
+                    OutlinedButton(
+                        onClick = { onResetWater() },
+                        modifier = Modifier.weight(0.8f).testTag("reset_water_btn"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Reset", fontSize = 11.sp)
+                    }
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 4.dp),
+                    color = colorScheme.outlineVariant.copy(alpha = 0.5f)
+                )
+
+                // Recurring Notification Reminders Section
+                val context = LocalContext.current
+                val permissionLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { isGranted ->
+                    if (isGranted) {
+                        onSetWaterReminder(true, waterReminderIntervalHours)
+                    } else {
+                        onSetWaterReminder(false, waterReminderIntervalHours)
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFF33B5E5).copy(alpha = 0.15f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsActive,
+                                    contentDescription = "Water Reminders",
+                                    tint = Color(0xFF33B5E5),
+                                    modifier = Modifier.padding(6.dp).size(16.dp)
+                                )
+                            }
+                            Column {
+                                Text(
+                                    text = "Hydration Reminders",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = colorScheme.onSurface
+                                )
+                                Text(
+                                    text = if (isWaterReminderEnabled) "Reminders active every $waterReminderIntervalHours hr" else "Get periodic notifications to drink water",
+                                    fontSize = 11.sp,
+                                    color = colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = isWaterReminderEnabled,
+                            onCheckedChange = { checked ->
+                                if (checked) {
+                                    if (Build.VERSION.SDK_INT >= 33) {
+                                        val hasPermission = ContextCompat.checkSelfPermission(
+                                            context,
+                                            Manifest.permission.POST_NOTIFICATIONS
+                                        ) == PackageManager.PERMISSION_GRANTED
+
+                                        if (hasPermission) {
+                                            onSetWaterReminder(true, waterReminderIntervalHours)
+                                        } else {
+                                            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                        }
+                                    } else {
+                                        onSetWaterReminder(true, waterReminderIntervalHours)
+                                    }
+                                } else {
+                                    onSetWaterReminder(false, waterReminderIntervalHours)
+                                }
+                            },
+                            modifier = Modifier.testTag("water_reminder_switch")
+                        )
+                    }
+
+                    if (isWaterReminderEnabled) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Notification Frequency",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = colorScheme.onSurfaceVariant
+                            )
+
+                            val intervals = listOf(1, 2, 3, 4)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                intervals.forEach { hrs ->
+                                    FilterChip(
+                                        selected = waterReminderIntervalHours == hrs,
+                                        onClick = { onSetWaterReminder(true, hrs) },
+                                        label = { Text("Every ${hrs}h", fontSize = 11.sp) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        if (Build.VERSION.SDK_INT >= 33) {
+                                            val hasPermission = ContextCompat.checkSelfPermission(
+                                                context,
+                                                Manifest.permission.POST_NOTIFICATIONS
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                            if (!hasPermission) {
+                                                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                                return@TextButton
+                                            }
+                                        }
+                                        onSendTestWaterNotification()
+                                    },
+                                    modifier = Modifier.testTag("send_test_water_notif_btn")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Send,
+                                        contentDescription = "Test Notification",
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Send Test Reminder", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Modal dialogs trigger
@@ -244,6 +455,8 @@ fun TrackersTab(
 
     if (showAddDietDialog) {
         AddDietAlertDialog(
+            isEstimatingFood = isEstimatingFood,
+            onEstimateFood = onEstimateFood,
             onDismiss = { showAddDietDialog = false },
             onConfirm = { meal, name, cal, protein, carb, fat ->
                 onAddDiet(meal, name, cal, protein, carb, fat)
@@ -572,17 +785,22 @@ fun AddWorkoutAlertDialog(
 
 @Composable
 fun AddDietAlertDialog(
+    isEstimatingFood: Boolean = false,
+    onEstimateFood: ((String, String, (EstimatedFoodNutrition) -> Unit) -> Unit)? = null,
     onDismiss: () -> Unit,
     onConfirm: (String, String, Int, Int, Int, Int) -> Unit
 ) {
     var foodName by remember { mutableStateOf("") }
+    var quantityConsumed by remember { mutableStateOf("") }
     var mealType by remember { mutableStateOf("Snack") }
     var caloriesStr by remember { mutableStateOf("") }
     var proteinStr by remember { mutableStateOf("") }
     var carbsStr by remember { mutableStateOf("") }
     var fatStr by remember { mutableStateOf("") }
+    var estimationNote by remember { mutableStateOf("") }
 
     val meals = listOf("Breakfast", "Lunch", "Dinner", "Snack")
+    val colorScheme = MaterialTheme.colorScheme
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -611,9 +829,58 @@ fun AddDietAlertDialog(
                 OutlinedTextField(
                     value = foodName,
                     onValueChange = { foodName = it },
-                    label = { Text("What did you eat? (e.g. Salmon 150g)") },
+                    label = { Text("Food Name (e.g. Biryani, Pizza, Omelet)") },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                OutlinedTextField(
+                    value = quantityConsumed,
+                    onValueChange = { quantityConsumed = it },
+                    label = { Text("Quantity Consumed (e.g. 1 plate, 200g, 2 slices)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (onEstimateFood != null) {
+                    FilledTonalButton(
+                        onClick = {
+                            if (foodName.isNotBlank()) {
+                                val qty = if (quantityConsumed.isBlank()) "1 portion" else quantityConsumed
+                                onEstimateFood(foodName, qty) { est ->
+                                    caloriesStr = est.calories.toString()
+                                    proteinStr = est.protein.toString()
+                                    carbsStr = est.carbs.toString()
+                                    fatStr = est.fat.toString()
+                                    estimationNote = est.note
+                                }
+                            }
+                        },
+                        enabled = foodName.isNotBlank() && !isEstimatingFood,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        if (isEstimatingFood) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Auto Converting...", fontSize = 12.sp)
+                        } else {
+                            Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("⚡ Auto Convert to Calories & Macros", fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                if (estimationNote.isNotEmpty()) {
+                    Text(
+                        text = "Note: $estimationNote",
+                        fontSize = 10.sp,
+                        color = colorScheme.primary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
 
                 OutlinedTextField(
                     value = caloriesStr,
@@ -658,7 +925,12 @@ fun AddDietAlertDialog(
                     val carb = carbsStr.toIntOrNull() ?: 0
                     val fat = fatStr.toIntOrNull() ?: 0
                     if (foodName.isNotEmpty() && cal >= 0) {
-                        onConfirm(mealType, foodName, cal, prot, carb, fat)
+                        val fullNameWithQty = if (quantityConsumed.isNotBlank() && !foodName.contains(quantityConsumed)) {
+                            "$foodName ($quantityConsumed)"
+                        } else {
+                            foodName
+                        }
+                        onConfirm(mealType, fullNameWithQty, cal, prot, carb, fat)
                     }
                 }
             ) {

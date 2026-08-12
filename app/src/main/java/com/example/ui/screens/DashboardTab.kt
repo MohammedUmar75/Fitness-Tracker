@@ -6,6 +6,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -36,13 +37,18 @@ fun DashboardTab(
     aiAdvice: AIRecommendation?,
     onNavigateToCoach: () -> Unit,
     modifier: Modifier = Modifier,
+    userProfile: com.example.data.UserProfile? = null,
+    onNavigateToProfile: () -> Unit = {},
     customTargetCalories: Int = 0,
     customTargetProtein: Int = 0,
     customTargetCarbs: Int = 0,
     customTargetFat: Int = 0,
     waterIntakeMl: Int = 0,
     onAddWater: (Int) -> Unit = {},
-    onResetWater: () -> Unit = {}
+    onResetWater: () -> Unit = {},
+    dailySteps: Int = 0,
+    targetSteps: Int = 10000,
+    onNavigateToFootsteps: () -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
 
@@ -53,11 +59,22 @@ fun DashboardTab(
     val totalFatConsumed = diets.sumOf { it.fatGram }.toFloat()
     val totalCaloriesBurned = workouts.sumOf { it.caloriesBurned }.toFloat()
 
-    // Goal values from active AI recommendations or defaults
-    val targetCalories = if (customTargetCalories > 0) customTargetCalories.toFloat() else (aiAdvice?.caloriesTarget?.toFloat() ?: 0f)
-    val targetProtein = if (customTargetProtein > 0) customTargetProtein.toFloat() else (aiAdvice?.proteinTarget?.toFloat() ?: 0f)
-    val targetCarbs = if (customTargetCarbs > 0) customTargetCarbs.toFloat() else (aiAdvice?.carbsTarget?.toFloat() ?: 0f)
-    val targetFat = if (customTargetFat > 0) customTargetFat.toFloat() else (aiAdvice?.fatTarget?.toFloat() ?: 0f)
+    // Goal values: custom override -> AI recommendation -> Profile calculated target
+    val targetCalories = if (customTargetCalories > 0) customTargetCalories.toFloat()
+        else if (aiAdvice?.caloriesTarget != null && aiAdvice.caloriesTarget > 0) aiAdvice.caloriesTarget.toFloat()
+        else (userProfile?.recommendedCalories?.toFloat() ?: 0f)
+
+    val targetProtein = if (customTargetProtein > 0) customTargetProtein.toFloat()
+        else if (aiAdvice?.proteinTarget != null && aiAdvice.proteinTarget > 0) aiAdvice.proteinTarget.toFloat()
+        else (userProfile?.recommendedProteinGrams?.toFloat() ?: 0f)
+
+    val targetCarbs = if (customTargetCarbs > 0) customTargetCarbs.toFloat()
+        else if (aiAdvice?.carbsTarget != null && aiAdvice.carbsTarget > 0) aiAdvice.carbsTarget.toFloat()
+        else (userProfile?.recommendedCarbsGrams?.toFloat() ?: 0f)
+
+    val targetFat = if (customTargetFat > 0) customTargetFat.toFloat()
+        else if (aiAdvice?.fatTarget != null && aiAdvice.fatTarget > 0) aiAdvice.fatTarget.toFloat()
+        else (userProfile?.recommendedFatGrams?.toFloat() ?: 0f)
 
     val colorScheme = MaterialTheme.colorScheme
 
@@ -138,37 +155,149 @@ fun DashboardTab(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                CenteredProgressRing(
-                    consumed = totalCaloriesConsumed,
-                    target = targetCalories,
-                    burned = totalCaloriesBurned
-                )
+                if (targetCalories <= 0f) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountBox,
+                            contentDescription = null,
+                            modifier = Modifier.size(36.dp),
+                            tint = colorScheme.primary
+                        )
+                        Text(
+                            text = "Calorie Goal Unconfigured",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Complete your profile metrics (age, height, weight) to calculate your recommended daily calorie balance.",
+                            fontSize = 12.sp,
+                            color = colorScheme.onSurfaceVariant,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = onNavigateToProfile,
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Set Up Profile Metrics", fontSize = 12.sp)
+                        }
+                    }
+                } else {
+                    CenteredProgressRing(
+                        consumed = totalCaloriesConsumed,
+                        target = targetCalories,
+                        burned = totalCaloriesBurned
+                    )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                // Breakdown metrics rows
+                    // Breakdown metrics rows
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        MetricMiniBox(
+                            label = "Eaten",
+                            value = "${totalCaloriesConsumed.toInt()} kcal",
+                            icon = Icons.Default.Restaurant,
+                            color = colorScheme.primary
+                        )
+                        MetricMiniBox(
+                            label = "Burned",
+                            value = "-${totalCaloriesBurned.toInt()} kcal",
+                            icon = Icons.Default.DirectionsRun,
+                            color = colorScheme.tertiary
+                        )
+                        MetricMiniBox(
+                            label = "Remaining",
+                            value = "${(targetCalories - totalCaloriesConsumed + totalCaloriesBurned).toInt()} kcal",
+                            icon = Icons.Default.Flag,
+                            color = colorScheme.secondary
+                        )
+                    }
+
+                    if (totalCaloriesConsumed == 0f && totalCaloriesBurned == 0f) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = "No meals or workouts logged today yet.",
+                            fontSize = 11.sp,
+                            color = colorScheme.onSurfaceVariant,
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                        )
+                    }
+                }
+            }
+        }
+
+        // Footsteps Activity Card on Dashboard
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = colorScheme.primaryContainer.copy(alpha = 0.35f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            shape = RoundedCornerShape(18.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceAround
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    MetricMiniBox(
-                        label = "Eaten",
-                        value = "${totalCaloriesConsumed.toInt()} kcal",
-                        icon = Icons.Default.Restaurant,
-                        color = colorScheme.primary
-                    )
-                    MetricMiniBox(
-                        label = "Burned",
-                        value = "-${totalCaloriesBurned.toInt()} kcal",
-                        icon = Icons.Default.DirectionsRun,
-                        color = colorScheme.tertiary
-                    )
-                    MetricMiniBox(
-                        label = "Remaining",
-                        value = "${(targetCalories - totalCaloriesConsumed + totalCaloriesBurned).toInt()} kcal",
-                        icon = Icons.Default.Flag,
-                        color = colorScheme.secondary
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(colorScheme.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DirectionsWalk,
+                            contentDescription = "Footsteps",
+                            tint = colorScheme.onPrimary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = "Daily Footsteps",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "%,d / %,d".format(java.util.Locale.getDefault(), dailySteps, targetSteps),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = colorScheme.onSurface
+                        )
+                        val stepPercent = ((dailySteps.toFloat() / targetSteps.coerceAtLeast(1)) * 100).toInt()
+                        Text(
+                            text = "$stepPercent% of daily goal completed",
+                            fontSize = 11.sp,
+                            color = colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                Button(
+                    onClick = onNavigateToFootsteps,
+                    colors = ButtonDefaults.buttonColors(containerColor = colorScheme.primary),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text("Footsteps Menu", fontSize = 12.sp)
                 }
             }
         }
@@ -220,115 +349,6 @@ fun DashboardTab(
                     color = Color(0xFFD4AF37), // Gold
                     unit = "g"
                 )
-            }
-        }
-
-        // Interactive Water Tracker Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = colorScheme.surface),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.LocalDrink,
-                            contentDescription = "Water Tracker",
-                            tint = Color(0xFF33B5E5)
-                        )
-                        Text(
-                            text = "Aqueous Water Monitor",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    Text(
-                        text = "$waterIntakeMl / 2500 ml",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Black,
-                        color = Color(0xFF33B5E5)
-                    )
-                }
-
-                // Wave/Liquid percentage bar
-                val currentPercent = if (waterIntakeMl > 0) (waterIntakeMl.toFloat() / 2500f).coerceIn(0f, 1f) else 0f
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    LinearProgressIndicator(
-                        progress = { currentPercent },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(18.dp)
-                            .clip(RoundedCornerShape(9.dp)),
-                        color = Color(0xFF33B5E5),
-                        trackColor = Color(0xFF33B5E5).copy(alpha = 0.15f)
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = if (currentPercent >= 1.0f) "Maximum hydration reached! Excellent." else "Track and hit standard hydration quotas.",
-                            fontSize = 10.sp,
-                            color = colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "${(currentPercent * 100).toInt()}%",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                // Interaction controls row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { onAddWater(250) },
-                        modifier = Modifier.weight(1f).testTag("add_water_250_btn"),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF33B5E5))
-                    ) {
-                        Text("+ 250 ml", fontSize = 11.sp, color = Color.White)
-                    }
-
-                    Button(
-                        onClick = { onAddWater(500) },
-                        modifier = Modifier.weight(1f).testTag("add_water_500_btn"),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0099CC))
-                    ) {
-                        Text("+ 500 ml", fontSize = 11.sp, color = Color.White)
-                    }
-
-                    OutlinedButton(
-                        onClick = { onResetWater() },
-                        modifier = Modifier.weight(0.8f).testTag("reset_water_btn"),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Text("Reset", fontSize = 11.sp)
-                    }
-                }
             }
         }
 

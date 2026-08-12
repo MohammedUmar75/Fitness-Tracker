@@ -63,6 +63,15 @@ data class NutritionAnalysisParsed(
     @Json(name = "adjustmentsList") val adjustmentsList: String
 )
 
+@JsonClass(generateAdapter = true)
+data class FoodEstimationParsed(
+    @Json(name = "calories") val calories: Int,
+    @Json(name = "protein") val protein: Int,
+    @Json(name = "carbs") val carbs: Int,
+    @Json(name = "fat") val fat: Int,
+    @Json(name = "note") val note: String? = null
+)
+
 interface GeminiApiService {
     @POST("v1beta/models/gemini-3.5-flash:generateContent")
     suspend fun generateContent(

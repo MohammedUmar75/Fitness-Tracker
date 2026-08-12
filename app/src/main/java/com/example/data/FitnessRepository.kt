@@ -4,8 +4,22 @@ import kotlinx.coroutines.flow.Flow
 
 class FitnessRepository(
     private val fitnessDao: FitnessDao,
-    private val userProfileDao: UserProfileDao
+    private val userProfileDao: UserProfileDao,
+    private val dailyActivityDao: DailyActivityDao
 ) {
+
+    val allDailyActivity: Flow<List<DailyActivityEntity>> = dailyActivityDao.getAllActivityHistory()
+
+    fun getActivityForDate(date: String): Flow<DailyActivityEntity?> =
+        dailyActivityDao.getActivityForDate(date)
+
+    suspend fun saveDailyActivity(activity: DailyActivityEntity) {
+        dailyActivityDao.insertOrUpdateActivity(activity)
+    }
+
+    suspend fun clearDailyActivity() {
+        dailyActivityDao.clearAllActivityHistory()
+    }
 
     val userProfile: Flow<UserProfileEntity?> = userProfileDao.getUserProfile()
 
@@ -69,5 +83,6 @@ class FitnessRepository(
         fitnessDao.clearAllRecommendations()
         fitnessDao.clearAllNutritionAnalyses()
         userProfileDao.clearUserProfile()
+        dailyActivityDao.clearAllActivityHistory()
     }
 }

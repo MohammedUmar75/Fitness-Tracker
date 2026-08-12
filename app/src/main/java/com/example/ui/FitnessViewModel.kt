@@ -97,7 +97,7 @@ class FitnessViewModel(
     private val _targetSteps = MutableStateFlow(10000)
     val targetSteps: StateFlow<Int> = _targetSteps.asStateFlow()
 
-    private val _isStepTrackingActive = MutableStateFlow(false)
+    private val _isStepTrackingActive = MutableStateFlow(true)
     val isStepTrackingActive: StateFlow<Boolean> = _isStepTrackingActive.asStateFlow()
 
     private val _sensorTypeName = MutableStateFlow("Hardware Step Counter")
@@ -286,12 +286,16 @@ class FitnessViewModel(
         setupStepSensors()
         updateStreakOnAppOpen()
 
-        // Automatically load existing advice and health profile on date switch
+        // Automatically load existing advice, health profile, and Room step activity on date switch
         viewModelScope.launch {
             _selectedDate.collect { date ->
                 loadRecommendationForDate(date)
                 loadHealthProfileForDate(date)
-                _dailySteps.value = prefs.getInt("steps_log_$date", 0)
+                repository.getActivityForDate(date).collect { activity ->
+                    val prefsSteps = prefs.getInt("steps_log_$date", 0)
+                    val roomSteps = activity?.stepCount ?: prefsSteps
+                    _dailySteps.value = roomSteps
+                }
             }
         }
         // Initialize all trackers directly to zero so user can input custom logs
@@ -351,7 +355,9 @@ class FitnessViewModel(
     private fun setupStepSensors() {
         try {
             sensorManager = getApplication<Application>().getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-            if (_isStepTrackingActive.value) {
+            val isTracking = prefs.getBoolean("is_step_tracking_active", true)
+            _isStepTrackingActive.value = isTracking
+            if (isTracking) {
                 registerSensorListeners()
             }
         } catch (e: Exception) {
@@ -374,6 +380,13 @@ class FitnessViewModel(
         if (detectorSensor != null) {
             sm.registerListener(this, detectorSensor, SensorManager.SENSOR_DELAY_UI)
             _sensorTypeName.value = "Hardware Step Detector"
+            return
+        }
+
+        val accelSensor = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        if (accelSensor != null) {
+            sm.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_GAME)
+            _sensorTypeName.value = "Accelerometer Step Detector"
             return
         }
 
@@ -407,6 +420,20 @@ class FitnessViewModel(
                     incrementStepCount(1)
                 }
             }
+            Sensor.TYPE_ACCELEROMETER -> {
+                val x = event.values[0]
+                val y = event.values[1]
+                val z = event.values[2]
+                val magnitude = kotlin.math.sqrt((x * x + y * y + z * z).toDouble()).toFloat()
+                val now = System.currentTimeMillis()
+                if (magnitude > 11.8f && !isAccelAbovePeak && (now - lastAccelStepTime) > 280) {
+                    isAccelAbovePeak = true
+                    lastAccelStepTime = now
+                    incrementStepCount(1)
+                } else if (magnitude < 10.0f) {
+                    isAccelAbovePeak = false
+                }
+            }
         }
     }
 
@@ -420,6 +447,21 @@ class FitnessViewModel(
         _dailySteps.value = newTotal
         prefs.edit().putInt("steps_log_$date", newTotal).apply()
         _stepHistoryRefresh.value += 1
+
+        viewModelScope.launch {
+            val user = userProfile.value
+            val distanceKm = if (user.strideMeters > 0f) (newTotal * user.strideMeters) / 1000f else 0f
+            val cals = (newTotal * 0.04f).toInt()
+            repository.saveDailyActivity(
+                com.example.data.DailyActivityEntity(
+                    date = date,
+                    stepCount = newTotal,
+                    distanceKm = distanceKm,
+                    caloriesBurned = cals,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+        }
 
         val target = _targetSteps.value
         if (oldTotal < target && newTotal >= target) {
@@ -451,15 +493,29 @@ class FitnessViewModel(
         initialHardwareSteps = -1f
         prefs.edit().putInt("steps_log_$date", 0).apply()
         _stepHistoryRefresh.value += 1
+
+        viewModelScope.launch {
+            repository.saveDailyActivity(
+                com.example.data.DailyActivityEntity(
+                    date = date,
+                    stepCount = 0,
+                    distanceKm = 0f,
+                    caloriesBurned = 0,
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+        }
     }
 
     fun startStepTracking() {
         _isStepTrackingActive.value = true
+        prefs.edit().putBoolean("is_step_tracking_active", true).apply()
         registerSensorListeners()
     }
 
     fun pauseStepTracking() {
         _isStepTrackingActive.value = false
+        prefs.edit().putBoolean("is_step_tracking_active", false).apply()
         unregisterSensorListeners()
     }
 
@@ -949,7 +1005,8 @@ class FitnessViewModelFactory(private val application: Application) : ViewModelP
         if (modelClass.isAssignableFrom(FitnessViewModel::class.java)) {
             val repository = FitnessRepository(
                 com.example.data.DatabaseModule.provideFitnessDao(application),
-                com.example.data.DatabaseModule.provideUserProfileDao(application)
+                com.example.data.DatabaseModule.provideUserProfileDao(application),
+                com.example.data.DatabaseModule.provideDailyActivityDao(application)
             )
             @Suppress("UNCHECKED_CAST")
             return FitnessViewModel(application, repository) as T

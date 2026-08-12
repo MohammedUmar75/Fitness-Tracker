@@ -11,14 +11,16 @@ import androidx.room.RoomDatabase
         DietIntake::class,
         AIRecommendation::class,
         NutritionAnalysis::class,
-        UserProfileEntity::class
+        UserProfileEntity::class,
+        DailyActivityEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun fitnessDao(): FitnessDao
     abstract fun userProfileDao(): UserProfileDao
+    abstract fun dailyActivityDao(): DailyActivityDao
 
     companion object {
         @Volatile

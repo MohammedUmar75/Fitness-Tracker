@@ -24,4 +24,8 @@ object DatabaseModule {
     fun provideUserProfileDao(context: Context): UserProfileDao {
         return provideAppDatabase(context).userProfileDao()
     }
+
+    fun provideDailyActivityDao(context: Context): DailyActivityDao {
+        return provideAppDatabase(context).dailyActivityDao()
+    }
 }
